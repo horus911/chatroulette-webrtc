@@ -1,4 +1,4 @@
-const ws = new WebSocket("wss://expensive-hurricane-crow.glitch.me");
+const ws = new WebSocket("wss://expensive-hurricane-crow.glitch.me/");
 let localStream;
 let peerConnection;
 let remoteVideoEl;
