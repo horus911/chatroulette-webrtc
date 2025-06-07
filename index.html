@@ -1,37 +1,186 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Chatroulette WebRTC</title>
-  <link rel="stylesheet" href="style.css" />
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mini Chatroulette WebRTC + WebSocket</title>
+<style>
+  body { font-family: Arial, sans-serif; text-align: center; background: #222; color: white; margin: 0; padding: 0; }
+  video { width: 45%; max-width: 300px; margin: 10px; background: black; border-radius: 8px; }
+  #videos { display: flex; justify-content: center; flex-wrap: wrap; }
+  button { margin: 10px; padding: 10px 20px; font-size: 16px; cursor: pointer; }
+  #status { margin-top: 10px; font-weight: bold; }
+</style>
 </head>
 <body>
-  <div id="app">
-    <div class="wrap">
-      <header>
-        <div class="title">Chatroulette 🎥</div>
-        <div class="participant-count" id="userCount">Utilisateurs connectés : 0</div>
-      </header>
+<h1>Mini Chatroulette WebRTC + WebSocket</h1>
 
-      <div id="videos"></div>
+<div id="videos">
+  <video id="localVideo" autoplay muted playsinline></video>
+  <video id="remoteVideo" autoplay playsinline></video>
+</div>
 
-      <div id="controls">
-        <button id="nextBtn">⏭️ Suivant</button>
-        <button id="muteBtn">🔇 Mute</button>
-        <button id="stopBtn">⏹️ Stop</button>
-      </div>
+<button id="startBtn">Démarrer</button>
+<button id="nextBtn" disabled>Suivant</button>
 
-      <audio id="backgroundMusic" src="music.mp3" autoplay loop></audio>
-    </div>
-  </div>
+<div id="status">Déconnecté</div>
 
-  <div id="toast"></div>
-  <div id="recordingIndicator" style="display: none;">
-    <div class="recording-dot"></div>
-    Enregistrement en cours...
-  </div>
+<script>
+(() => {
+  const startBtn = document.getElementById('startBtn');
+  const nextBtn = document.getElementById('nextBtn');
+  const localVideo = document.getElementById('localVideo');
+  const remoteVideo = document.getElementById('remoteVideo');
+  const statusDiv = document.getElementById('status');
 
-  <script src="script.js"></script>
+  let localStream = null;
+  let peerConnection = null;
+  let ws = null;
+  let roomId = null;
+  const servers = {
+    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+  };
+
+  function logStatus(msg) {
+    console.log(msg);
+    statusDiv.textContent = msg;
+  }
+
+  // Init WebSocket connection and signaling handlers
+  function connectWebSocket() {
+    ws = new WebSocket('ws://localhost:8080'); // Adapte l’URL si besoin
+
+    ws.onopen = () => {
+      logStatus('Connecté au serveur de signalisation');
+      // Demande un partenaire
+      ws.send(JSON.stringify({ type: 'join' }));
+    };
+
+    ws.onerror = e => {
+      logStatus('Erreur WebSocket');
+      console.error(e);
+    };
+
+    ws.onmessage = async (message) => {
+      const data = JSON.parse(message.data);
+
+      if(data.type === 'match') {
+        logStatus('Partenaire trouvé, initialisation WebRTC');
+        startPeerConnection(data.partnerId, data.initiator);
+      } 
+      else if(data.type === 'signal') {
+        if(!peerConnection) {
+          console.warn('Signal reçu mais peerConnection non initialisé');
+          return;
+        }
+        if(data.signal.sdp) {
+          await peerConnection.setRemoteDescription(new RTCSessionDescription(data.signal));
+          if(data.signal.type === 'offer') {
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            ws.send(JSON.stringify({type: 'signal', signal: peerConnection.localDescription, to: data.from}));
+          }
+        } else if(data.signal.candidate) {
+          try {
+            await peerConnection.addIceCandidate(new RTCIceCandidate(data.signal));
+          } catch(e) {
+            console.error('Erreur ajout ICE candidate', e);
+          }
+        }
+      }
+      else if(data.type === 'partner_left') {
+        logStatus('Le partenaire a quitté. Clique sur Suivant pour en trouver un autre.');
+        closePeerConnection();
+        nextBtn.disabled = false;
+      }
+    };
+
+    ws.onclose = () => {
+      logStatus('Connexion WebSocket fermée');
+      closePeerConnection();
+    };
+  }
+
+  // Setup PeerConnection and event handlers
+  async function startPeerConnection(partnerId, isInitiator) {
+    peerConnection = new RTCPeerConnection(servers);
+
+    peerConnection.onicecandidate = event => {
+      if(event.candidate) {
+        ws.send(JSON.stringify({ type: 'signal', signal: event.candidate, to: partnerId }));
+      }
+    };
+
+    peerConnection.ontrack = event => {
+      remoteVideo.srcObject = event.streams[0];
+    };
+
+    if(localStream) {
+      localStream.getTracks().forEach(track => {
+        peerConnection.addTrack(track, localStream);
+      });
+    }
+
+    if(isInitiator) {
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+      ws.send(JSON.stringify({ type: 'signal', signal: offer, to: partnerId }));
+    }
+
+    logStatus('Connexion WebRTC en cours...');
+  }
+
+  // Close peer connection and remote video stream
+  function closePeerConnection() {
+    if(peerConnection) {
+      peerConnection.close();
+      peerConnection = null;
+    }
+    remoteVideo.srcObject = null;
+  }
+
+  // Start local camera/mic
+  async function startLocalStream() {
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      localVideo.srcObject = localStream;
+      logStatus('Caméra et micro activés');
+      startBtn.disabled = true;
+      nextBtn.disabled = false;
+    } catch (err) {
+      alert('Erreur accès caméra/micro: ' + err.message);
+    }
+  }
+
+  // Button handlers
+  startBtn.onclick = async () => {
+    await startLocalStream();
+    connectWebSocket();
+  };
+
+  nextBtn.onclick = () => {
+    // Demande un nouveau partenaire
+    if(ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'next' }));
+      closePeerConnection();
+      logStatus('Recherche d’un nouveau partenaire...');
+      nextBtn.disabled = true;
+    }
+  };
+
+  // Nettoyage avant de fermer la page
+  window.onbeforeunload = () => {
+    if(ws) {
+      ws.close();
+    }
+    if(peerConnection) {
+      peerConnection.close();
+    }
+    if(localStream) {
+      localStream.getTracks().forEach(t => t.stop());
+    }
+  };
+})();
+</script>
 </body>
 </html>
