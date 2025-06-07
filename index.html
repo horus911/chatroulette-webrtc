@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chatroulette WebRTC</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <div class="wrap">
+      <header>
+        <div class="title">Chatroulette 🎥</div>
+        <div class="participant-count" id="userCount">Utilisateurs connectés : 0</div>
+      </header>
+
+      <div id="videos"></div>
+
+      <div id="controls">
+        <button id="nextBtn">⏭️ Suivant</button>
+        <button id="muteBtn">🔇 Mute</button>
+        <button id="stopBtn">⏹️ Stop</button>
+      </div>
+
+      <audio id="backgroundMusic" src="music.mp3" autoplay loop></audio>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+  <div id="recordingIndicator" style="display: none;">
+    <div class="recording-dot"></div>
+    Enregistrement en cours...
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
